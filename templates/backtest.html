@@ -1,0 +1,266 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="row">
+    <!-- Left Column: Controls and History -->
+    <div class="col-md-4">
+        <h4>New Backtest</h4>
+        <div class="card mb-4">
+            <div class="card-body">
+                <form id="backtest-form">
+                     <!-- START: THIS SECTION IS THE FIX -->
+                    <div class="mb-3">
+                        <label for="symbols" class="form-label">Symbols (comma-separated)</label>
+                        <input type="text" class="form-control" id="symbols" name="symbols" placeholder="e.g., RELIANCE,TCS (leave blank for all)">
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label for="start_date" class="form-label">Start Date</label>
+                            <input type="date" class="form-control" id="start_date" name="start_date" required>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label for="end_date" class="form-label">End Date</label>
+                            <input type="date" class="form-control" id="end_date" name="end_date" required>
+                        </div>
+                    </div>
+                    <!-- END: THIS SECTION IS THE FIX -->
+                    <button type="submit" class="btn btn-primary w-100" id="run-btn">
+                        <span id="run-btn-text">Run Backtest</span>
+                        <div id="run-spinner" class="spinner-border spinner-border-sm" role="status" style="display: none;"></div>
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <h4>Backtest History</h4>
+        <div class="list-group" id="history-list">
+            {% if not jobs %}
+            <p class="text-muted">No past backtests found. Run one to begin.</p>
+            {% else %}
+            {% for job_id, job_data in jobs %}
+            <a href="#" class="list-group-item list-group-item-action" data-job-id="{{ job_id }}">
+                <div class="d-flex w-100 justify-content-between">
+                    <h6 class="mb-1">
+                        {% if job_data.params.symbols %}{{ job_data.params.symbols[:20] }}{% else %}All Symbols{% endif %}
+                    </h6>
+                    <small>{{ job_data.status }}</small>
+                </div>
+                <p class="mb-1 small">{{ job_data.params.start_date }} to {{ job_data.params.end_date }}</p>
+            </a>
+            {% endfor %}
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Right Column: Results Viewer -->
+    <div class="col-md-8">
+        <div id="results-container" style="display:none;">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h4 id="results-title">Backtest Results</h4>
+                <a href="#" id="download-results-csv" class="btn btn-sm btn-outline-primary">Download Detailed CSV</a>
+            </div>
+            
+            <ul class="nav nav-tabs" id="results-tab" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" id="summary-tab-btn" data-bs-toggle="tab" data-bs-target="#summary-tab" type="button">Summary</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="analysis-tab-btn" data-bs-toggle="tab" data-bs-target="#analysis-tab" type="button">Pattern Analysis</button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" id="config-tab-btn" data-bs-toggle="tab" data-bs-target="#config-tab" type="button">Configuration</button>
+                </li>
+            </ul>
+
+            <div class="tab-content card" id="results-tab-content">
+                <!-- Summary Tab -->
+                <div class="tab-pane fade show active p-3" id="summary-tab">
+                    <div class="row">
+                        <div class="col-md-5" id="summary-table-container"></div>
+                        <div class="col-md-7"><img id="summary-plot-img" src="" class="img-fluid"></div>
+                    </div>
+                </div>
+                <!-- Pattern Analysis Tab -->
+                <div class="tab-pane fade p-3" id="analysis-tab">
+                    <!-- Analysis content will be injected here by JS -->
+                </div>
+                <!-- Config Tab -->
+                <div class="tab-pane fade p-3" id="config-tab">
+                    <pre><code id="config-json-container"></code></pre>
+                </div>
+            </div>
+        </div>
+        <div id="welcome-message" class="text-center text-muted mt-5">
+            <h5>Select a past backtest or run a new one to view results.</h5>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const backtestForm = document.getElementById('backtest-form');
+    const runBtn = document.getElementById('run-btn');
+    const runBtnText = document.getElementById('run-btn-text');
+    const runSpinner = document.getElementById('run-spinner');
+    const historyList = document.getElementById('history-list');
+
+    const resultsContainer = document.getElementById('results-container');
+    const welcomeMessage = document.getElementById('welcome-message');
+    
+    // --- Result Elements ---
+    const resultsTitle = document.getElementById('results-title');
+    const downloadLink = document.getElementById('download-results-csv');
+    const summaryTable = document.getElementById('summary-table-container');
+    const summaryPlot = document.getElementById('summary-plot-img');
+    const analysisContainer = document.getElementById('analysis-tab');
+    const configContainer = document.getElementById('config-json-container');
+
+    // --- START: THIS IS THE CORRECTED AND ROBUST FUNCTION ---
+    function displayJobDetails(jobData) {
+        // First, check if the core objects exist. If not, show an error and stop.
+        if (!jobData) {
+            alert('Error: Received invalid job data.');
+            return;
+        }
+
+        welcomeMessage.style.display = 'none';
+        resultsContainer.style.display = 'block';
+        resultsTitle.innerText = `Results for Job ${jobData.job_id ? jobData.job_id.substring(0, 8) : 'Unknown'}`;
+
+        // Handle the Configuration Tab
+        if (jobData.config) {
+            configContainer.textContent = JSON.stringify(jobData.config, null, 2);
+        } else {
+            configContainer.textContent = 'Configuration data not found for this job.';
+        }
+
+        // Now, specifically check for the 'results' object.
+        const results = jobData.results;
+        if (!results) {
+            summaryTable.innerHTML = `<div class="alert alert-danger">Error: The 'results' object is missing for this job. The backtest may have failed to complete properly.</div>`;
+            summaryPlot.style.display = 'none';
+            downloadLink.style.display = 'none';
+            analysisContainer.innerHTML = '';
+            return;
+        }
+
+        // If we reach here, 'results' exists. Now we can safely render the content.
+
+        // Summary Tab
+        summaryTable.innerHTML = results.summary_html || '<div class="alert alert-warning">Summary table is empty.</div>';
+        
+        if (results.summary_plot) {
+            summaryPlot.src = 'data:image/png;base64,' + results.summary_plot;
+            summaryPlot.style.display = 'block';
+        } else {
+            summaryPlot.style.display = 'none';
+        }
+        
+        // Download Link
+        if (results.csv_path) {
+            downloadLink.href = `/${results.csv_path}`;
+            downloadLink.style.display = 'inline-block';
+        } else {
+            downloadLink.style.display = 'none';
+        }
+
+        // Pattern Analysis Tab
+        analysisContainer.innerHTML = ''; // Clear previous content
+        if (results.pattern_analysis && Object.keys(results.pattern_analysis).length > 0) {
+            for (const key in results.pattern_analysis) {
+                const analysis = results.pattern_analysis[key];
+                if (!analysis) continue; // Skip if a specific analysis is null
+
+                const section = document.createElement('div');
+                section.classList.add('mb-5');
+                
+                const plotHtml = analysis.plot ? `<div class="col-md-6"><img src="data:image/png;base64,${analysis.plot}" class="img-fluid"></div>` : '<div class="col-md-6"><p class="text-muted">Plot not available.</p></div>';
+                const tableHtml = analysis.table ? `<div class="col-md-6">${analysis.table}</div>` : '<div class="col-md-6"><p class="text-muted">Table not available.</p></div>';
+
+                section.innerHTML = `
+                    <h5>Analysis by ${key}</h5>
+                    <div class="row align-items-center">
+                        ${tableHtml}
+                        ${plotHtml}
+                    </div>
+                    <hr>
+                `;
+                analysisContainer.appendChild(section);
+            }
+        } else {
+            analysisContainer.innerHTML = '<p class="text-muted">No pattern analysis was generated for this run.</p>';
+        }
+    }
+    // --- END: CORRECTED FUNCTION ---
+    // --- Function to Display Job Details ---
+   
+    // --- Function to Poll a Running Job ---
+    function pollStatus(jobId) {
+        const interval = setInterval(() => {
+            fetch(`/backtest/status/${jobId}`)
+                .then(response => response.json())
+                .then(job => {
+                    if (job.status === 'completed') {
+                        clearInterval(interval);
+                        runBtn.disabled = false;
+                        runBtnText.style.display = 'inline';
+                        runSpinner.style.display = 'none';
+                        // Refresh history list and display results
+                        window.location.reload(); 
+                    } else if (job.status === 'failed') {
+                        clearInterval(interval);
+                        alert(`Backtest failed: ${job.error || 'Unknown error'}`);
+                        runBtn.disabled = false;
+                        runBtnText.style.display = 'inline';
+                        runSpinner.style.display = 'none';
+                    }
+                });
+        }, 5000);
+    }
+
+    // --- Event Listeners ---
+    backtestForm.addEventListener('submit', function (e) {
+        e.preventDefault();
+        runBtn.disabled = true;
+        runBtnText.style.display = 'none';
+        runSpinner.style.display = 'inline-block';
+        
+        fetch('/backtest/run', { method: 'POST', body: new FormData(this) })
+            .then(response => response.json())
+            .then(data => {
+                if (data.job_id) {
+                    pollStatus(data.job_id);
+                } else {
+                    alert('Failed to start backtest.');
+                    runBtn.disabled = false;
+                }
+            });
+    });
+
+    historyList.addEventListener('click', function(e) {
+        e.preventDefault();
+        const target = e.target.closest('.list-group-item');
+        if (!target) return;
+
+        const jobId = target.dataset.jobId;
+        
+        // Set active state for visual feedback
+        document.querySelectorAll('#history-list .list-group-item').forEach(item => item.classList.remove('active'));
+        target.classList.add('active');
+        
+        // Fetch and display the selected job's full details
+        fetch(`/api/backtest/${jobId}`)
+            .then(response => response.json())
+            .then(jobData => {
+                if (jobData.error) {
+                    alert('Could not load job details.');
+                } else {
+                    displayJobDetails(jobData);
+                }
+            });
+    });
+});
+</script>
+{% endblock %}

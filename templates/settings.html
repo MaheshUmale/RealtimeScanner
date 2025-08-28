@@ -1,0 +1,23 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<h2>Application & Strategy Settings</h2>
+<p class="text-muted">Changes made here will be applied immediately to the real-time scanner and for new backtests.</p>
+<div class="card">
+    <div class="card-body">
+        <form method="POST">
+            <div class="row">
+                {% for key, value in config.items() %}
+                {% if key.isupper() %}
+                <div class="col-md-6 mb-3">
+                    <label for="{{ key }}" class="form-label">{{ key.replace('_', ' ').title() }}</label>
+                    <input type="text" class="form-control" id="{{ key }}" name="{{ key }}" value="{{ value }}">
+                </div>
+                {% endif %}
+                {% endfor %}
+            </div>
+            <button type="submit" class="btn btn-success">Save Settings</button>
+        </form>
+    </div>
+</div>
+{% endblock %}

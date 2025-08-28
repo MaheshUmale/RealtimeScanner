@@ -1,0 +1,146 @@
+{% extends "layout.html" %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Real-time Breakout Scanner</h2>
+    <div>
+        <span class="badge bg-secondary me-2">Status: <span id="scanner-status">{{ scanner_status }}</span></span>
+        {% if scanner_status == 'Stopped' %}
+        <a href="{{ url_for('scanner_start') }}" class="btn btn-success">Start Scanner</a>
+        {% else %}
+        <a href="{{ url_for('scanner_stop') }}" class="btn btn-danger">Stop Scanner</a>
+        {% endif %}
+        <a href="{{ url_for('download_opportunities') }}" class="btn btn-primary" id="download-btn" style="display: none;">Download CSV</a>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <div id="opportunities-table-container">
+            <p id="no-data-msg" class="text-center text-muted">Awaiting data from the scanner...</p>
+            <table class="table table-striped table-hover" id="opportunities-table" style="display:none;">
+                <thead>
+                    <tr>
+                        <th>Symbol</th>
+                        <th>Price</th>
+                        <th>Type</th>
+                        <th>Entry</th>
+                        <th>Stop Loss</th>
+                        <th>Target</th>
+                    </tr>
+                </thead>
+                <tbody id="opportunities-tbody">
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Chart Modal -->
+<div class="modal fade" id="chartModal" tabindex="-1" aria-labelledby="chartModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="chartModalLabel">Chart</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div id="chart-container"></div>
+        <div id="chart-loading-spinner" class="text-center" style="display: none;">
+             <div class="spinner-border text-primary" role="status">
+                 <span class="visually-hidden">Loading...</span>
+             </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/charting.js') }}"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        const tbody = document.getElementById('opportunities-tbody');
+        const table = document.getElementById('opportunities-table');
+        const noDataMsg = document.getElementById('no-data-msg');
+        const downloadBtn = document.getElementById('download-btn');
+        const chartModal = new bootstrap.Modal(document.getElementById('chartModal'));
+        const chartModalLabel = document.getElementById('chartModalLabel');
+        const chartContainer = document.getElementById('chart-container');
+        const chartSpinner = document.getElementById('chart-loading-spinner');
+        
+        // Initialize the chart object. It will be reused.
+        const stockChart = new StockChart('chart-container');
+
+        function fetchOpportunities() {
+            fetch('/api/opportunities')
+                .then(response => response.json())
+                .then(data => {
+                    tbody.innerHTML = '';
+                    if (data && data.length > 0) {
+                        table.style.display = '';
+                        noDataMsg.style.display = 'none';
+                        downloadBtn.style.display = 'inline-block';
+                        data.forEach(opp => {
+                            let row = `<tr data-symbol="${opp.symbol}">
+                                <td><strong>${opp.symbol}</strong></td>
+                                <td>${opp.price.toFixed(2)}</td>
+                                <td>${opp.breakout_type}</td>
+                                <td>${opp.entry_price.toFixed(2)}</td>
+                                <td>${opp.stop_loss.toFixed(2)}</td>
+                                <td>${opp.target.toFixed(2)}</td>
+                            </tr>`;
+                            tbody.innerHTML += row;
+                        });
+                    } else {
+                        table.style.display = 'none';
+                        noDataMsg.style.display = 'block';
+                    }
+                })
+                .catch(error => console.error('Error fetching opportunities:', error));
+        }
+
+        // Event listener for clicking a row in the table
+        tbody.addEventListener('click', function(event) {
+            const row = event.target.closest('tr');
+            if (!row) return;
+
+            const symbol = row.dataset.symbol;
+            if (!symbol) return;
+            
+            chartModalLabel.innerText = `${symbol} - 1 Minute Chart`;
+            chartSpinner.style.display = 'block';
+            stockChart.destroy(); // Clear previous chart
+            chartModal.show();
+            
+            // Fetch chart data and render the chart
+            fetch(`/api/chart/${symbol}`)
+                .then(response => response.json())
+                .then(chartData => {
+                    chartSpinner.style.display = 'none';
+                    if (chartData && chartData.length > 0) {
+                        stockChart.createCandlestickChartWithVolume(chartData);
+                    } else {
+                        chartContainer.innerHTML = `<p class="text-center text-danger">Could not load chart data for ${symbol}.</p>`;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching chart data:', error);
+                    chartSpinner.style.display = 'none';
+                    chartContainer.innerHTML = `<p class="text-center text-danger">An error occurred while loading the chart.</p>`;
+                });
+        });
+        
+        // Clean up the chart when the modal is closed
+        document.getElementById('chartModal').addEventListener('hidden.bs.modal', function () {
+            stockChart.destroy();
+        });
+
+        if ("{{ scanner_status }}" === "Running") {
+            setInterval(fetchOpportunities, 15000);
+            fetchOpportunities();
+        }
+    });
+</script>
+{% endblock %}
